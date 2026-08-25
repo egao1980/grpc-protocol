@@ -19,7 +19,7 @@ Messages are proto objects or octets. Codec is [`protobuf-protocol`](https://git
 
 `grpc-error` carries `:status` (`:unavailable`, `:unimplemented`, …) plus `:details`.
 
-CI: `setup-client` + `setup-roswell` + `scripts/ci-install.lisp` / `ci-test.lisp` (OCI only).
+CI: canned [`cl-repository`](https://github.com/egao1980/cl-repository) (`test-system.yml` / `setup-client` + `ci`). Deps from `ghcr.io/egao1980/cl-systems`.
 
 ## License
 
