@@ -1,5 +1,5 @@
 (defsystem "grpc-protocol"
-  :version "0.1.0"
+  :version "0.1.1"
   :description "CLOS gRPC protocol for cl-stack (not JSON-RPC)"
   :author "egao1980"
   :license "MIT"

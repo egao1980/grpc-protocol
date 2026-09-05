@@ -14,6 +14,7 @@
            #:grpc-channel-backend
            #:grpc-channel-credentials
            #:grpc-channel-metadata
+           #:grpc-channel-compression
            #:grpc-channel-closed-p
            #:grpc-call-channel
            #:grpc-call-method

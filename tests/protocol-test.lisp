@@ -2,7 +2,8 @@
 
 (defclass mock-backend (grpc-protocol:grpc-backend) ())
 
-(defclass mock-channel (grpc-protocol:grpc-channel) ())
+(defclass mock-channel (grpc-protocol:grpc-channel)
+  ((last-metadata :initform nil :accessor mock-last-metadata)))
 
 (defclass mock-stream (grpc-protocol:grpc-stream)
   ((inbox :initarg :inbox :initform nil :accessor mock-inbox)
@@ -19,6 +20,7 @@
 (defmethod grpc-protocol:backend-grpc-call ((channel mock-channel) method request
                                             &key timeout metadata)
   (declare (ignore timeout))
+  (setf (mock-last-metadata channel) metadata)
   (list :ok method request
         (grpc-protocol:grpc-channel-target channel)
         (getf metadata :response-class)))
@@ -101,6 +103,21 @@
                            :channel nil :method "/x")))
     (ok (signals (grpc-protocol:grpc-send st 1) 'grpc-protocol:grpc-error))
     (ok (signals (grpc-protocol:grpc-recv st) 'grpc-protocol:grpc-error))))
+
+(deftest connect-stores-compression
+  (with-mock
+    (lambda ()
+      (let ((ch (grpc-protocol:grpc-connect "localhost:1" :compression :gzip)))
+        (ok (eq :gzip (grpc-protocol:grpc-channel-compression ch)))
+        (ok (eq :gzip (getf (grpc-protocol:grpc-channel-metadata ch) :compression)))))))
+
+(deftest call-overrides-compression
+  (with-mock
+    (lambda ()
+      (let ((ch (grpc-protocol:grpc-connect "localhost:1" :compression :gzip)))
+        (grpc-protocol:grpc-call ch "/pkg.Svc/Ping" #() :compression :deflate)
+        (ok (eq :deflate (getf (mock-last-metadata ch) :compression)))
+        (ok (eq :gzip (grpc-protocol:grpc-channel-compression ch)))))))
 
 (deftest error-slots
   (let ((c (make-condition 'grpc-protocol:grpc-error
