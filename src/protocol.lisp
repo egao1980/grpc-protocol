@@ -10,7 +10,19 @@
    (backend :initarg :backend :reader grpc-channel-backend :initform nil)
    (credentials :initarg :credentials :reader grpc-channel-credentials :initform nil)
    (metadata :initarg :metadata :reader grpc-channel-metadata :initform nil)
+   (compression :initarg :compression :initform nil :accessor grpc-channel-compression)
    (closed-p :initform nil :accessor grpc-channel-closed-p)))
+
+(defmethod initialize-instance :after ((channel grpc-channel) &key)
+  (unless (grpc-channel-compression channel)
+    (let ((c (getf (grpc-channel-metadata channel) :compression)))
+      (when c
+        (setf (grpc-channel-compression channel) c)))))
+
+(defun %metadata-with-compression (metadata compression)
+  (if compression
+      (list* :compression compression metadata)
+      metadata))
 
 (defclass grpc-call ()
   ((channel :initarg :channel :reader grpc-call-channel)
@@ -89,16 +101,22 @@ message when METADATA includes :response-class."))
              :status :internal
              :message "*grpc-backend* is nil — load grpc-backend-native")))
 
-(defun grpc-connect (target &key credentials metadata (backend *grpc-backend*))
+(defun grpc-connect (target &key credentials metadata compression (backend *grpc-backend*))
+  "Open a channel. COMPRESSION is :gzip / :deflate (http2) or NIL.
+   Stashed as metadata :compression — not a gRPC header."
   (backend-grpc-connect (%ensure-backend backend) target
-                        :credentials credentials :metadata metadata))
+                        :credentials credentials
+                        :metadata (%metadata-with-compression metadata compression)))
 
-(defun grpc-call (channel method request &key timeout metadata)
+(defun grpc-call (channel method request &key timeout metadata compression)
   (when (grpc-channel-closed-p channel)
     (error 'grpc-error :status :failed-precondition :message "channel is closed"))
-  (backend-grpc-call channel method request :timeout timeout :metadata metadata))
+  (backend-grpc-call channel method request
+                     :timeout timeout
+                     :metadata (%metadata-with-compression metadata compression)))
 
-(defun grpc-stream (channel method &key metadata)
+(defun grpc-stream (channel method &key metadata compression)
   (when (grpc-channel-closed-p channel)
     (error 'grpc-error :status :failed-precondition :message "channel is closed"))
-  (backend-grpc-stream channel method :metadata metadata))
+  (backend-grpc-stream channel method
+                       :metadata (%metadata-with-compression metadata compression)))
