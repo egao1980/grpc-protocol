@@ -127,3 +127,74 @@
     (ok (eq :unavailable (grpc-protocol:grpc-error-status c)))
     (ok (equal "down" (grpc-protocol:grpc-error-message c)))
     (ok (equal '(:retry 1) (grpc-protocol:grpc-error-details c)))))
+
+(deftest method-handler-normalizes
+  (let ((h (grpc-protocol:make-grpc-method-handler
+            "pkg.Svc/Ping" #'identity :kind :unary)))
+    (ok (equal "/pkg.Svc/Ping" (grpc-protocol:grpc-method-handler-method h)))
+    (ok (eq :unary (grpc-protocol:grpc-method-handler-kind h)))
+    (ok (eq #'identity (grpc-protocol:grpc-method-handler-function h)))))
+
+(deftest method-handler-rejects-kind
+  (ok (signals (grpc-protocol:make-grpc-method-handler
+                "/x" #'identity :kind :nope)
+               'grpc-protocol:grpc-error)))
+
+(deftest find-handler-from-list
+  (let* ((h (grpc-protocol:make-grpc-method-handler
+             "/pkg.Svc/Ping" #'identity))
+         (found (grpc-protocol:find-grpc-method-handler (list h) "pkg.Svc/Ping")))
+    (ok (eq h found))
+    (ok (null (grpc-protocol:find-grpc-method-handler (list h) "/nope")))))
+
+(deftest find-handler-from-function
+  (let ((found (grpc-protocol:find-grpc-method-handler
+                (lambda (method)
+                  (when (equal method "/pkg.Svc/Ping")
+                    #'identity))
+                "/pkg.Svc/Ping")))
+    (ok (typep found 'grpc-protocol:grpc-method-handler))
+    (ok (eq :unary (grpc-protocol:grpc-method-handler-kind found)))))
+
+(deftest base-backend-serve-unimplemented
+  (let ((grpc-protocol:*grpc-backend* (make-instance 'grpc-protocol:grpc-backend)))
+    (ok (signals (grpc-protocol:grpc-serve '())
+                 'grpc-protocol:grpc-error))))
+
+(deftest serve-requires-backend
+  (let ((grpc-protocol:*grpc-backend* nil))
+    (ok (signals (grpc-protocol:grpc-serve '())
+                 'grpc-protocol:grpc-error))))
+
+(defclass mock-server (grpc-protocol:grpc-server) ())
+
+(defmethod grpc-protocol:backend-grpc-serve ((backend mock-backend) handlers
+                                             &key host port credentials metadata)
+  (declare (ignore metadata))
+  (let ((s (make-instance 'mock-server
+                          :backend backend
+                          :host (or host "127.0.0.1")
+                          :port (or port 0)
+                          :credentials credentials
+                          :handlers handlers)))
+    (setf (grpc-protocol:grpc-server-running-p s) t)
+    s))
+
+(deftest mock-serve-stop
+  (with-mock
+    (lambda ()
+      (let* ((h (grpc-protocol:make-grpc-method-handler
+                 "/pkg.Svc/Ping" #'identity :kind :bidi))
+             (s (grpc-protocol:grpc-serve (list h)
+                                          :host "127.0.0.1"
+                                          :port 8443
+                                          :credentials '(:ssl :cert "c" :key "k"))))
+        (ok (typep s 'grpc-protocol:grpc-server))
+        (ok (grpc-protocol:grpc-server-running-p s))
+        (ok (equal "127.0.0.1" (grpc-protocol:grpc-server-host s)))
+        (ok (eql 8443 (grpc-protocol:grpc-server-port s)))
+        (ok (eq h (grpc-protocol:find-grpc-method-handler
+                   (grpc-protocol:grpc-server-handlers s)
+                   "/pkg.Svc/Ping")))
+        (grpc-protocol:grpc-stop s)
+        (ok (not (grpc-protocol:grpc-server-running-p s)))))))

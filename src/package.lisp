@@ -24,9 +24,27 @@
            #:backend-grpc-connect
            #:backend-grpc-call
            #:backend-grpc-stream
+           #:backend-grpc-serve
+           #:backend-grpc-stop
            #:grpc-send
            #:grpc-recv
            #:grpc-close
-           #:grpc-connect))
+           #:grpc-connect
+           #:grpc-serve
+           #:grpc-stop
+           #:grpc-server
+           #:grpc-server-backend
+           #:grpc-server-host
+           #:grpc-server-port
+           #:grpc-server-credentials
+           #:grpc-server-handlers
+           #:grpc-server-running-p
+           #:grpc-method-handler
+           #:grpc-method-handler-method
+           #:grpc-method-handler-kind
+           #:grpc-method-handler-function
+           #:make-grpc-method-handler
+           #:find-grpc-method-handler
+           #:grpc-method-kind-p))
 
 (in-package #:grpc-protocol)
