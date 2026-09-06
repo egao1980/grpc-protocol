@@ -120,3 +120,118 @@ message when METADATA includes :response-class."))
     (error 'grpc-error :status :failed-precondition :message "channel is closed"))
   (backend-grpc-stream channel method
                        :metadata (%metadata-with-compression metadata compression)))
+
+;;; ---------------------------------------------------------------------------
+;;; Server / accept loop
+;;; ---------------------------------------------------------------------------
+
+(defparameter *grpc-method-kinds*
+  '(:unary :server-stream :client-stream :bidi)
+  "Accepted GRPC-METHOD-HANDLER :kind values.")
+
+(defun grpc-method-kind-p (kind)
+  (and (member kind *grpc-method-kinds* :test #'eq) t))
+
+(defclass grpc-method-handler ()
+  ((method :initarg :method :reader grpc-method-handler-method)
+   (kind :initarg :kind :reader grpc-method-handler-kind :initform :unary)
+   (function :initarg :function :reader grpc-method-handler-function))
+  (:documentation
+   "One registered RPC. METHOD is \"/package.Service/Method\".
+KIND is :unary, :server-stream, :client-stream, or :bidi.
+FUNCTION:
+  :unary          (lambda (request accept-stream) → response)
+  :server-stream  (lambda (request accept-stream)) — send with GRPC-SEND
+  :client-stream  (lambda (accept-stream)) — recv until :eof, then send
+  :bidi           (lambda (accept-stream)) — send/recv freely"))
+
+(defmethod initialize-instance :after ((handler grpc-method-handler) &key)
+  (let ((kind (grpc-method-handler-kind handler)))
+    (unless (grpc-method-kind-p kind)
+      (error 'grpc-error
+             :status :invalid-argument
+             :message (format nil "unknown gRPC method kind ~S" kind)))))
+
+(defun make-grpc-method-handler (method function &key (kind :unary))
+  "Build a GRPC-METHOD-HANDLER. METHOD is normalized to a leading slash."
+  (make-instance 'grpc-method-handler
+                 :method (%serve-normalize-method method)
+                 :function function
+                 :kind kind))
+
+(defun %serve-normalize-method (method)
+  (let ((s (string method)))
+    (if (and (plusp (length s)) (char= (char s 0) #\/))
+        s
+        (concatenate 'string "/" s))))
+
+(defun find-grpc-method-handler (handlers method)
+  "Look up METHOD in HANDLERS (list, hash-table, or function of method).
+   Returns a GRPC-METHOD-HANDLER or NIL."
+  (let ((name (%serve-normalize-method method)))
+    (typecase handlers
+      (null nil)
+      (function
+       (let ((found (funcall handlers name)))
+         (cond
+           ((null found) nil)
+           ((typep found 'grpc-method-handler) found)
+           ((functionp found)
+            (make-grpc-method-handler name found :kind :unary))
+           (t found))))
+      (hash-table
+       (or (gethash name handlers)
+           (gethash method handlers)))
+      (list
+       (or (find name handlers
+                 :key #'grpc-method-handler-method
+                 :test #'string=)
+           (find name handlers
+                 :key #'grpc-method-handler-method
+                 :test #'string-equal)))
+      (t
+       (error 'grpc-error
+              :status :invalid-argument
+              :message "handlers must be a list, hash-table, or function")))))
+
+(defclass grpc-server ()
+  ((backend :initarg :backend :reader grpc-server-backend :initform nil)
+   (host :initarg :host :reader grpc-server-host :initform "127.0.0.1")
+   (port :initarg :port :reader grpc-server-port :initform nil)
+   (credentials :initarg :credentials :reader grpc-server-credentials :initform nil)
+   (handlers :initarg :handlers :reader grpc-server-handlers :initform nil)
+   (running-p :initform nil :accessor grpc-server-running-p)))
+
+(defgeneric backend-grpc-serve (backend handlers &key host port credentials metadata)
+  (:documentation
+   "Accept gRPC over TLS. HANDLERS is a list of GRPC-METHOD-HANDLER,
+a hash-table, or a function of method → handler.
+CREDENTIALS is (:ssl :cert path :key path) — no h2c / :insecure.
+Returns a GRPC-SERVER."))
+
+(defgeneric backend-grpc-stop (server &key)
+  (:documentation "Stop accepting. SERVER is a GRPC-SERVER."))
+
+(defmethod backend-grpc-serve ((backend grpc-backend) handlers
+                               &key host port credentials metadata)
+  (declare (ignore handlers host port credentials metadata))
+  (error 'grpc-error
+         :status :unimplemented
+         :message "backend-grpc-serve not implemented — load grpc-backend-http2"))
+
+(defmethod backend-grpc-stop ((server grpc-server) &key)
+  (setf (grpc-server-running-p server) nil)
+  server)
+
+(defun grpc-serve (handlers &key (host "127.0.0.1") port credentials metadata
+                  (backend *grpc-backend*))
+  "Start an accept loop. See BACKEND-GRPC-SERVE. TLS certs via CREDENTIALS
+   or METADATA :ssl-cert / :ssl-key."
+  (backend-grpc-serve (%ensure-backend backend) handlers
+                      :host host
+                      :port port
+                      :credentials credentials
+                      :metadata metadata))
+
+(defun grpc-stop (server &key)
+  (backend-grpc-stop server))
